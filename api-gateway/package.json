@@ -11,6 +11,7 @@
     "@opentelemetry/sdk-node": "^0.57.0",
     "axios": "^1.7.0",
     "express": "^4.19.0",
-    "winston": "^3.13.0"
+    "winston": "^3.13.0",
+    "@opentelemetry/winston-transport": "^0.10.0"
   }
 }

@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
 
@@ -14,9 +15,11 @@ public class ProcessController {
 
     private static final Logger log = LoggerFactory.getLogger(ProcessController.class);
     private final Tracer tracer;
+    private final PaymentRepository repository;
 
-    public ProcessController(Tracer tracer) {
-        this.tracer = tracer;
+    public ProcessController(Tracer tracer, PaymentRepository repository) {
+        this.tracer     = tracer;
+        this.repository = repository;
     }
 
     @GetMapping("/health")
@@ -28,9 +31,9 @@ public class ProcessController {
     public Map<String, Object> charge(@RequestBody Map<String, Object> body) throws InterruptedException {
         var orderId = (String) body.get("orderId");
         var userId  = (String) body.get("userId");
-        var amount  = body.get("amount");
+        var amount  = new BigDecimal(body.get("amount").toString());
 
-        var span = tracer.currentSpan();
+        var span    = tracer.currentSpan();
         var traceId = span != null ? span.context().traceId() : "no-trace";
         var spanId  = span != null ? span.context().spanId()  : "no-span";
 
@@ -41,24 +44,18 @@ public class ProcessController {
         var validateSpan = tracer.nextSpan().name("card.validate").start();
         try (var ws = tracer.withSpan(validateSpan)) {
             log.info("Validando cartão - orderId={} traceId={} step=card-validate", orderId, traceId);
-            Thread.sleep(25); // simula chamada ao gateway de cartão
+            Thread.sleep(25);
             validateSpan.tag("card.validated", "true");
         } finally {
             validateSpan.end();
         }
 
-        // Span filho: persistência da transação
-        var persistSpan = tracer.nextSpan().name("db.payment.insert").start();
+        // Persiste no PostgreSQL — span db gerado automaticamente pelo Spring Data + Micrometer
         var transactionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        try (var ws = tracer.withSpan(persistSpan)) {
-            log.info("Persistindo transação - orderId={} transactionId={} traceId={} step=payment-persist",
-                    orderId, transactionId, traceId);
-            Thread.sleep(15); // simula INSERT no banco
-            persistSpan.tag("db.system", "postgresql");
-            persistSpan.tag("payment.transactionId", transactionId);
-        } finally {
-            persistSpan.end();
-        }
+        log.info("Persistindo transação no banco - orderId={} transactionId={} traceId={} step=payment-persist",
+                orderId, transactionId, traceId);
+
+        repository.save(new PaymentTransaction(transactionId, orderId, userId, amount, "approved", traceId));
 
         log.info("Cobrança concluída - orderId={} transactionId={} amount={} traceId={} step=payment-complete",
                 orderId, transactionId, amount, traceId);

@@ -1,60 +1,69 @@
 'use strict';
-const express = require('express');
+const express  = require('express');
+const { Pool } = require('pg');
 const { trace, SpanStatusCode } = require('@opentelemetry/api');
-const logger  = require('./logger');
+const logger   = require('./logger');
 
-const app    = express();
-const tracer = trace.getTracer('inventory-service');
+const app  = express();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 app.use(express.json());
-
-// Estoque simulado
-const stock = { 'PROD-001': 50, 'PROD-002': 3, 'PROD-003': 0 };
-const prices = { 'PROD-001': 99.90, 'PROD-002': 249.90, 'PROD-003': 19.90 };
 
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'inventory-service' }));
 
 app.post('/reserve', async (req, res) => {
   const { productId, quantity, orderId } = req.body;
   const span = trace.getActiveSpan();
-
   span?.setAttribute('inventory.productId', productId);
   span?.setAttribute('inventory.quantity', quantity);
 
-  // Span filho: consulta ao banco de estoque
-  const available = await tracer.startActiveSpan('db.inventory.query', async (dbSpan) => {
-    dbSpan.setAttribute('db.system', 'postgresql');
-    dbSpan.setAttribute('db.statement', `SELECT stock FROM inventory WHERE product_id = '${productId}'`);
-    await new Promise(r => setTimeout(r, 30)); // simula query
-    const qty = stock[productId] ?? 0;
-    dbSpan.setAttribute('db.rows_returned', 1);
-    dbSpan.end();
-    return qty;
-  });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  logger.info('Estoque consultado', { orderId, productId, available, requested: quantity, step: 'stock-check' });
+    // SELECT com lock — span gerado automaticamente pelo @opentelemetry/instrumentation-pg
+    logger.info('Consultando estoque no banco', { orderId, productId, step: 'db-stock-select' });
+    const { rows } = await client.query(
+      'SELECT stock, price FROM products WHERE id = $1 FOR UPDATE',
+      [productId]
+    );
 
-  if (available < quantity) {
-    span?.setStatus({ code: SpanStatusCode.ERROR, message: 'Estoque insuficiente' });
-    logger.error('Estoque insuficiente', { orderId, productId, available, requested: quantity, step: 'stock-insufficient' });
-    return res.status(409).json({ error: 'Estoque insuficiente', available, requested: quantity });
+    if (!rows.length || rows[0].stock < quantity) {
+      await client.query('ROLLBACK');
+      const available = rows[0]?.stock ?? 0;
+      span?.setStatus({ code: SpanStatusCode.ERROR, message: 'Estoque insuficiente' });
+      logger.error('Estoque insuficiente', { orderId, productId, available, requested: quantity, step: 'stock-insufficient' });
+      return res.status(409).json({ error: 'Estoque insuficiente', available, requested: quantity });
+    }
+
+    const totalPrice = parseFloat(rows[0].price) * quantity;
+
+    // UPDATE estoque
+    logger.info('Atualizando estoque no banco', { orderId, productId, quantity, step: 'db-stock-update' });
+    await client.query(
+      'UPDATE products SET stock = stock - $1 WHERE id = $2',
+      [quantity, productId]
+    );
+
+    // INSERT reserva
+    const reservationId = `RES-${Date.now()}`;
+    const traceId = span?.spanContext().traceId;
+    logger.info('Persistindo reserva', { orderId, reservationId, traceId, step: 'db-reservation-insert' });
+    await client.query(
+      'INSERT INTO inventory_reservations (id, order_id, product_id, quantity, trace_id) VALUES ($1,$2,$3,$4,$5)',
+      [reservationId, orderId, productId, quantity, traceId]
+    );
+
+    await client.query('COMMIT');
+    logger.info('Estoque reservado com sucesso', { orderId, reservationId, totalPrice, step: 'stock-reserved' });
+    res.json({ reservationId, productId, quantity, totalPrice });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    span?.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+    logger.error('Erro ao reservar estoque', { orderId, error: err.message, step: 'db-error' });
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
-
-  // Span filho: atualização do estoque
-  const reservationId = await tracer.startActiveSpan('db.inventory.update', async (dbSpan) => {
-    dbSpan.setAttribute('db.system', 'postgresql');
-    dbSpan.setAttribute('db.statement', `UPDATE inventory SET stock = stock - ${quantity} WHERE product_id = '${productId}'`);
-    await new Promise(r => setTimeout(r, 20));
-    stock[productId] -= quantity;
-    const resId = `RES-${Date.now()}`;
-    dbSpan.setAttribute('inventory.reservationId', resId);
-    dbSpan.end();
-    return resId;
-  });
-
-  const totalPrice = (prices[productId] ?? 0) * quantity;
-  logger.info('Estoque reservado', { orderId, productId, reservationId, totalPrice, step: 'stock-reserved' });
-
-  res.json({ reservationId, productId, quantity, totalPrice });
 });
 
 app.listen(3002, () => logger.info('inventory-service ouvindo na porta 3002'));
