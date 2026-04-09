@@ -1,5 +1,4 @@
 'use strict';
-
 const { createLogger, format, transports } = require('winston');
 const { trace } = require('@opentelemetry/api');
 
@@ -13,15 +12,9 @@ const injectTrace = format((info) => {
   return info;
 });
 
-const logger = createLogger({
+module.exports = createLogger({
   level: 'info',
-  format: format.combine(
-    injectTrace(),
-    format.timestamp(),
-    format.json()
-  ),
-  defaultMeta: { service: 'service-a' },
+  format: format.combine(injectTrace(), format.timestamp(), format.json()),
+  defaultMeta: { service: process.env.SERVICE_NAME || 'api-gateway' },
   transports: [new transports.Console()],
 });
-
-module.exports = logger;

@@ -9,11 +9,6 @@ receivers:
 processors:
   batch:
     timeout: 1s
-  resource:
-    attributes:
-      - action: insert
-        key: loki.resource.labels
-        value: service, scenario
 
 exporters:
   otlp/jaeger:
@@ -42,7 +37,7 @@ service:
 
     logs:
       receivers: [otlp]
-      processors: [batch, resource]
+      processors: [batch]
       exporters: [loki, debug]
 
     metrics:
