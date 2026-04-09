@@ -3,10 +3,14 @@ const express  = require('express');
 const { Pool } = require('pg');
 const { trace, SpanStatusCode } = require('@opentelemetry/api');
 const logger   = require('./logger');
+const { createGoldenSignals } = require('./golden-signals');
 
 const app  = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 app.use(express.json());
+
+const { goldenSignalsMiddleware } = createGoldenSignals('inventory-service', pool);
+app.use(goldenSignalsMiddleware);
 
 app.get('/health', (_, res) => res.json({ status: 'ok', service: 'inventory-service' }));
 
@@ -20,7 +24,6 @@ app.post('/reserve', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // SELECT com lock — span gerado automaticamente pelo @opentelemetry/instrumentation-pg
     logger.info('Consultando estoque no banco', { orderId, productId, step: 'db-stock-select' });
     const { rows } = await client.query(
       'SELECT stock, price FROM products WHERE id = $1 FOR UPDATE',
@@ -37,14 +40,9 @@ app.post('/reserve', async (req, res) => {
 
     const totalPrice = parseFloat(rows[0].price) * quantity;
 
-    // UPDATE estoque
     logger.info('Atualizando estoque no banco', { orderId, productId, quantity, step: 'db-stock-update' });
-    await client.query(
-      'UPDATE products SET stock = stock - $1 WHERE id = $2',
-      [quantity, productId]
-    );
+    await client.query('UPDATE products SET stock = stock - $1 WHERE id = $2', [quantity, productId]);
 
-    // INSERT reserva
     const reservationId = `RES-${Date.now()}`;
     const traceId = span?.spanContext().traceId;
     logger.info('Persistindo reserva', { orderId, reservationId, traceId, step: 'db-reservation-insert' });

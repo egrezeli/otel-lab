@@ -4,10 +4,14 @@ const axios    = require('axios');
 const { Pool } = require('pg');
 const { trace, SpanStatusCode } = require('@opentelemetry/api');
 const logger   = require('./logger');
+const { createGoldenSignals } = require('./golden-signals');
 
 const app  = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 app.use(express.json());
+
+const { goldenSignalsMiddleware } = createGoldenSignals('order-service', pool);
+app.use(goldenSignalsMiddleware);
 
 const INVENTORY_URL = process.env.INVENTORY_SERVICE_URL || 'http://inventory-service:3002';
 const PAYMENT_URL   = process.env.PAYMENT_SERVICE_URL   || 'http://payment-service:8080';
@@ -24,29 +28,24 @@ app.post('/orders', async (req, res) => {
   logger.info('Iniciando criação de pedido', { orderId, userId, productId, quantity, step: 'order-start' });
 
   try {
-    // Busca preço do produto para criar o pedido antes da reserva
     const traceId = span?.spanContext().traceId;
     const { rows } = await pool.query('SELECT price FROM products WHERE id = $1', [productId]);
     const totalPrice = rows.length ? parseFloat(rows[0].price) * quantity : 0;
 
-    // Persiste pedido no banco primeiro (necessário para FK da reserva)
     logger.info('Persistindo pedido no banco', { orderId, traceId, step: 'db-order-insert' });
     await pool.query(
       'INSERT INTO orders (id, user_id, product_id, quantity, total_price, status, trace_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
       [orderId, userId, productId, quantity, totalPrice, 'pending', traceId]
     );
 
-    // Reserva estoque
     logger.info('Reservando estoque', { orderId, productId, quantity, step: 'inventory-reserve' });
     const inventory = (await axios.post(`${INVENTORY_URL}/reserve`, { productId, quantity, orderId })).data;
 
-    // Processa pagamento
     logger.info('Processando pagamento', { orderId, amount: inventory.totalPrice, step: 'payment-charge' });
     const payment = (await axios.post(`${PAYMENT_URL}/payments/charge`, {
       orderId, userId, amount: inventory.totalPrice,
     })).data;
 
-    // Atualiza status do pedido
     logger.info('Atualizando status do pedido', { orderId, step: 'db-order-update' });
     await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['completed', orderId]);
 
