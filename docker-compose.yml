@@ -26,6 +26,7 @@ services:
       - "3000:3000"
     environment:
       SERVICE_NAME:      api-gateway
+      OTEL_SERVICE_NAME: api-gateway
       ORDER_SERVICE_URL: http://order-service:3001
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     depends_on:
@@ -38,6 +39,7 @@ services:
       - "3011:3001"
     environment:
       SERVICE_NAME:          order-service
+      OTEL_SERVICE_NAME:     order-service
       INVENTORY_SERVICE_URL: http://inventory-service:3002
       PAYMENT_SERVICE_URL:   http://payment-service:8080
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -57,7 +59,8 @@ services:
     ports:
       - "3012:3002"
     environment:
-      SERVICE_NAME: inventory-service
+      SERVICE_NAME:      inventory-service
+      OTEL_SERVICE_NAME: inventory-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       DATABASE_URL: postgresql://otellab:otellab@postgres:5432/ordersdb
     depends_on:

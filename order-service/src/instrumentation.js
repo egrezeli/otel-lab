@@ -1,16 +1,17 @@
 'use strict';
 const { NodeSDK } = require('@opentelemetry/sdk-node');
-const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-const { OTLPLogExporter }   = require('@opentelemetry/exporter-logs-otlp-http');
-const { OTLPMetricExporter } = require('@opentelemetry/exporter-metrics-otlp-http');
+const { OTLPTraceExporter }   = require('@opentelemetry/exporter-trace-otlp-http');
+const { OTLPLogExporter }     = require('@opentelemetry/exporter-logs-otlp-http');
+const { OTLPMetricExporter }  = require('@opentelemetry/exporter-metrics-otlp-http');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
-const { SimpleLogRecordProcessor } = require('@opentelemetry/sdk-logs');
+const { SimpleLogRecordProcessor }   = require('@opentelemetry/sdk-logs');
 const { PeriodicExportingMetricReader } = require('@opentelemetry/sdk-metrics');
 
-const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://otel-collector:4318';
+const endpoint    = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://otel-collector:4318';
+const serviceName = process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'order-service';
 
 new NodeSDK({
-  serviceName: process.env.SERVICE_NAME || 'order-service',
+  serviceName,
   traceExporter: new OTLPTraceExporter({ url: `${endpoint}/v1/traces` }),
   logRecordProcessor: new SimpleLogRecordProcessor(
     new OTLPLogExporter({ url: `${endpoint}/v1/logs` })
