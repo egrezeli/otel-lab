@@ -84,6 +84,16 @@ services:
       otel-collector:
         condition: service_started
 
+  # ── Load Bot ────────────────────────────────────────────────────────────────
+
+  load-bot:
+    build: ./load-bot
+    environment:
+      API_URL: http://api-gateway:3000
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
   # ── OpenTelemetry Collector ────────────────────────────────────────────────
 
   otel-collector:
