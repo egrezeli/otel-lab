@@ -78,18 +78,25 @@
 
     {
       "id": 12, "type": "timeseries",
-      "title": "Latência p99 — comparativo entre serviços",
-      "description": "p99 de cada serviço lado a lado. Identifica qual etapa da transação está mais lenta.",
+      "title": "Latência p99 — serviços + banco de dados",
+      "description": "p99 de cada camada: api-gateway, order-service, inventory-service e operações PostgreSQL (SELECT/INSERT/UPDATE). Identifica onde a transação passa mais tempo.",
       "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*postgresql.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } }] }
+        ]
       },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
       "targets": [
         {
           "expr": "histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_ms_milliseconds_bucket{route!=\"/health\"}[2m])))",
           "legendFormat": "{{service}} p99", "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, exported_job, db_operation_name) (rate(db_client_operation_duration_seconds_bucket[2m]))) * 1000",
+          "legendFormat": "postgresql {{exported_job}} {{db_operation_name}} p99", "refId": "B"
         }
       ]
     },
