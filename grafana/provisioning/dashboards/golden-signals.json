@@ -279,6 +279,189 @@
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "red" } } },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
       "targets": [{ "expr": "sum(http_errors_total{route!=\"/health\"})", "refId": "A" }]
+    },
+
+    { "type": "row", "id": 50, "title": "📦 Volume de Logs & Cardinalidade de Métricas", "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 51, "type": "timeseries",
+      "title": "Logs por minuto — por serviço",
+      "description": "Volume de log lines chegando ao Loki por serviço. Permite dimensionar custo de armazenamento e identificar serviços verbosos.",
+      "gridPos": { "x": 0, "y": 42, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "otellab_loki" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        { "expr": "sum by (job) (count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[1m]))", "legendFormat": "{{job}}", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 52, "type": "timeseries",
+      "title": "Logs por minuto — INFO vs ERROR",
+      "description": "Proporção entre logs informativos e de erro. Pico de ERROR sem pico de INFO indica problema silencioso.",
+      "gridPos": { "x": 12, "y": 42, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "otellab_loki" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "INFO" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        { "expr": "sum by (level) (count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[1m]))", "legendFormat": "{{level}}", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 53, "type": "timeseries",
+      "title": "Logs por requisição — eficiência de instrumentação",
+      "description": "Quantos logs são gerados por requisição. Valor estável indica instrumentação controlada, sem log storm.",
+      "gridPos": { "x": 0, "y": 50, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 5 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 10 }, { "color": "red", "value": 20 }
+          ]}
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] },
+        "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{route!=\"/health\"}[2m]))",
+          "legendFormat": "requisições/s", "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 54, "type": "bargauge",
+      "title": "Cardinalidade de métricas — séries por métrica",
+      "description": "Número de séries temporais por métrica. Alta cardinalidade (>1000 séries numa métrica) indica labels com valores ilimitados como userId ou traceId — anti-pattern que explode o Prometheus.",
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 50 },
+            { "color": "red", "value": 200 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+      "targets": [
+        { "expr": "count by (__name__) ({__name__=~\"http_requests_total\"})", "legendFormat": "http_requests_total", "refId": "A", "instant": true },
+        { "expr": "count by (__name__) ({__name__=~\"http_request_duration_ms_milliseconds_bucket\"})", "legendFormat": "http_duration_bucket", "refId": "B", "instant": true },
+        { "expr": "count by (__name__) ({__name__=~\"http_errors_total\"})", "legendFormat": "http_errors_total", "refId": "C", "instant": true },
+        { "expr": "count by (__name__) ({__name__=~\"db_client_operation_duration_seconds_count\"})", "legendFormat": "db_operation_duration", "refId": "D", "instant": true },
+        { "expr": "count by (__name__) ({__name__=~\"db_pool_connections_active\"})", "legendFormat": "db_pool_active", "refId": "E", "instant": true }
+      ]
+    },
+
+    {
+      "id": 55, "type": "stat",
+      "title": "Total de séries ativas",
+      "description": "Total de séries temporais no Prometheus. Saudável abaixo de 10k para este lab. Alta cardinalidade explodiria este número.",
+      "gridPos": { "x": 0, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 1000 }, { "color": "red", "value": 5000 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(scrape_samples_scraped)", "refId": "A", "instant": true }]
+    },
+
+    {
+      "id": 56, "type": "stat",
+      "title": "Labels indexados no Loki",
+      "description": "Loki indexa apenas job, level e service_name. Campos como traceId ficam no corpo do log — evita explosão de cardinalidade no índice.",
+      "gridPos": { "x": 4, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "vector(3)", "refId": "A", "instant": true }]
+    },
+
+    {
+      "id": 57, "type": "stat",
+      "title": "Métricas únicas (nomes)",
+      "description": "Número de métricas distintas. Baixo e estável — sem explosão por labels de alta cardinalidade.",
+      "gridPos": { "x": 8, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "count(count by (__name__) ({__name__=~\".+\"}))", "refId": "A", "instant": true }]
+    },
+
+    {
+      "id": 58, "type": "stat",
+      "title": "Logs/min total (todos os serviços)",
+      "description": "Volume agregado de logs por minuto. Proporcional ao RPS — sem log storm.",
+      "gridPos": { "x": 12, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "loki", "uid": "otellab_loki" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 500 }, { "color": "red", "value": 2000 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[1m]))", "refId": "A" }]
+    },
+
+    {
+      "id": 59, "type": "stat",
+      "title": "Streams ativos no Loki",
+      "description": "Número de streams (combinações únicas de labels). Baixo = cardinalidade controlada no índice de logs.",
+      "gridPos": { "x": 16, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "loki", "uid": "otellab_loki" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 20 }, { "color": "red", "value": 100 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "count(count by (job, level) (count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[5m])))", "refId": "A" }]
+    },
+
+    {
+      "id": 60, "type": "stat",
+      "title": "% logs de erro",
+      "description": "Proporção de logs ERROR sobre o total. Correlaciona com a taxa de erro dos Golden Signals.",
+      "gridPos": { "x": 20, "y": 58, "w": 4, "h": 4 },
+      "datasource": { "type": "loki", "uid": "otellab_loki" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 0.3 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(count_over_time({job=~\"api-gateway|order-service|inventory-service\", level=\"ERROR\"}[5m])) / sum(count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[5m]))", "refId": "A" }]
     }
 
   ]
