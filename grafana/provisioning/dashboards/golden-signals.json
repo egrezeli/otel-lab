@@ -1,0 +1,278 @@
+{
+  "uid": "otellab-golden-signals",
+  "title": "OTel Lab — Golden Signals",
+  "description": "Tráfego, Latência, Erros e Saturação por serviço — gerado pelo load-bot",
+  "tags": ["otellab", "golden-signals", "sre"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "schemaVersion": 38,
+  "panels": [
+
+    { "type": "row", "id": 1, "title": "🚦 Tráfego (Traffic)", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 2, "type": "timeseries",
+      "title": "Requisições por segundo — por serviço",
+      "description": "Taxa de requisições recebidas em cada serviço. Reflete a curva de carga do load-bot.",
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(http_requests_total{service!=\"\", route!=\"/health\"}[1m]))",
+          "legendFormat": "{{service}}", "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 3, "type": "timeseries",
+      "title": "Requisições por segundo — por status code",
+      "description": "Distribuição de status HTTP. 201=sucesso, 409=estoque insuficiente, 5xx=erros internos.",
+      "gridPos": { "x": 12, "y": 1, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*2.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*4.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*5.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        {
+          "expr": "sum by (status_code) (rate(http_requests_total{service=\"api-gateway\", route!=\"/health\"}[1m]))",
+          "legendFormat": "HTTP {{status_code}}", "refId": "A"
+        }
+      ]
+    },
+
+    { "type": "row", "id": 10, "title": "⏱ Latência (Latency)", "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 11, "type": "timeseries",
+      "title": "Latência p50 / p95 / p99 — api-gateway",
+      "description": "Percentis de latência da entrada pública. p99 alto indica degradação percebida pelo usuário.",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p99" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "p50" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_ms_milliseconds_bucket{service=\"api-gateway\", route!=\"/health\"}[2m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_ms_milliseconds_bucket{service=\"api-gateway\", route!=\"/health\"}[2m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_ms_milliseconds_bucket{service=\"api-gateway\", route!=\"/health\"}[2m])))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+
+    {
+      "id": 12, "type": "timeseries",
+      "title": "Latência p99 — comparativo entre serviços",
+      "description": "p99 de cada serviço lado a lado. Identifica qual etapa da transação está mais lenta.",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, service) (rate(http_request_duration_ms_milliseconds_bucket{route!=\"/health\"}[2m])))",
+          "legendFormat": "{{service}} p99", "refId": "A"
+        }
+      ]
+    },
+
+    { "type": "row", "id": 20, "title": "🔴 Erros (Errors)", "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 21, "type": "timeseries",
+      "title": "Taxa de erro — por serviço (%)",
+      "description": "Percentual de requisições com erro (4xx + 5xx). Acima de 5% indica problema.",
+      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 0.05 },
+            { "color": "red", "value": 0.15 }
+          ]}
+        }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(http_errors_total{route!=\"/health\"}[2m])) / sum by (service) (rate(http_requests_total{route!=\"/health\"}[2m]))",
+          "legendFormat": "{{service}}", "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 22, "type": "timeseries",
+      "title": "Volume de erros — por tipo",
+      "description": "Erros 4xx (cliente) vs 5xx (servidor). 409=estoque insuficiente é esperado pelo load-bot.",
+      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*4xx.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*5xx.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{status_code=~\"4..\", route!=\"/health\"}[2m]))", "legendFormat": "4xx (client errors)", "refId": "A" },
+        { "expr": "sum(rate(http_requests_total{status_code=~\"5..\", route!=\"/health\"}[2m]))", "legendFormat": "5xx (server errors)", "refId": "B" }
+      ]
+    },
+
+    { "type": "row", "id": 30, "title": "📊 Saturação (Saturation)", "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 31, "type": "timeseries",
+      "title": "Pool de conexões PostgreSQL — ativas vs ociosas",
+      "description": "Conexões ativas no pool. Próximo ao máximo (10) indica saturação do banco.",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*ativas.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*ociosas.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*aguardando.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "expr": "sum by (service) (db_pool_connections_active)", "legendFormat": "{{service}} ativas", "refId": "A" },
+        { "expr": "sum by (service) (db_pool_connections_idle)", "legendFormat": "{{service}} ociosas", "refId": "B" },
+        { "expr": "sum by (service) (db_pool_connections_waiting)", "legendFormat": "{{service}} aguardando", "refId": "C" }
+      ]
+    },
+
+    {
+      "id": 32, "type": "timeseries",
+      "title": "Latência de chamadas entre serviços (HTTP client)",
+      "description": "Tempo que cada serviço espera pela resposta do próximo. Identifica gargalos na cadeia.",
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, exported_job) (rate(http_client_duration_milliseconds_bucket[2m])))",
+          "legendFormat": "{{exported_job}} → downstream p95", "refId": "A"
+        }
+      ]
+    },
+
+    { "type": "row", "id": 40, "title": "🔢 Resumo — Stat Panels", "gridPos": { "x": 0, "y": 36, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 41, "type": "stat",
+      "title": "RPS atual (api-gateway)",
+      "gridPos": { "x": 0, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 8 }, { "color": "red", "value": 14 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "sum(rate(http_requests_total{service=\"api-gateway\", route!=\"/health\"}[1m]))", "refId": "A" }]
+    },
+
+    {
+      "id": 42, "type": "stat",
+      "title": "Latência p99 (api-gateway)",
+      "gridPos": { "x": 4, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 500 }, { "color": "red", "value": 1000 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_ms_milliseconds_bucket{service=\"api-gateway\", route!=\"/health\"}[2m])))", "refId": "A" }]
+    },
+
+    {
+      "id": 43, "type": "stat",
+      "title": "Taxa de erro atual",
+      "gridPos": { "x": 8, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.15 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "sum(rate(http_errors_total{route!=\"/health\"}[2m])) / sum(rate(http_requests_total{route!=\"/health\"}[2m]))", "refId": "A" }]
+    },
+
+    {
+      "id": 44, "type": "stat",
+      "title": "Conexões DB ativas",
+      "gridPos": { "x": 12, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 6 }, { "color": "red", "value": 9 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "sum(db_pool_connections_active)", "refId": "A" }]
+    },
+
+    {
+      "id": 45, "type": "stat",
+      "title": "Total de pedidos (sucesso)",
+      "gridPos": { "x": 16, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "sum(http_requests_total{service=\"api-gateway\", status_code=\"201\"})", "refId": "A" }]
+    },
+
+    {
+      "id": 46, "type": "stat",
+      "title": "Total de erros",
+      "gridPos": { "x": 20, "y": 37, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "red" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "targets": [{ "expr": "sum(http_errors_total{route!=\"/health\"})", "refId": "A" }]
+    }
+
+  ]
+}
