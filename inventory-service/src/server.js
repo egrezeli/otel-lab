@@ -6,7 +6,12 @@ const logger   = require('./logger');
 const { createGoldenSignals } = require('./golden-signals');
 
 const app  = express();
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const dbUrl  = new URL(process.env.DATABASE_URL.replace('postgresql://', 'http://'));
+const pool   = new Pool({
+  host: dbUrl.hostname, port: Number(dbUrl.port) || 5432,
+  database: dbUrl.pathname.slice(1),
+  user: dbUrl.username, password: dbUrl.password,
+});
 app.use(express.json());
 
 const { goldenSignalsMiddleware } = createGoldenSignals('inventory-service', pool);
@@ -58,6 +63,33 @@ app.post('/reserve', async (req, res) => {
     await client.query('ROLLBACK');
     span?.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
     logger.error('Erro ao reservar estoque', { orderId, error: err.message, step: 'db-error' });
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/release', async (req, res) => {
+  const { productId, quantity, orderId } = req.body;
+  const span = trace.getActiveSpan();
+  span?.setAttribute('inventory.productId', productId);
+  span?.setAttribute('inventory.quantity', quantity);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    logger.info('Revertendo reserva de estoque', { orderId, productId, quantity, step: 'db-stock-release' });
+    await client.query('UPDATE products SET stock = stock + $1 WHERE id = $2', [quantity, productId]);
+    await client.query('DELETE FROM inventory_reservations WHERE order_id = $1', [orderId]);
+
+    await client.query('COMMIT');
+    logger.info('Estoque revertido com sucesso', { orderId, productId, quantity, step: 'stock-released' });
+    res.json({ released: true, orderId, productId, quantity });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    span?.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
+    logger.error('Erro ao reverter estoque', { orderId, error: err.message, step: 'db-release-error' });
     res.status(500).json({ error: err.message });
   } finally {
     client.release();

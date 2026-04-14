@@ -1,0 +1,103 @@
+groups:
+  - name: golden_signals
+    interval: 30s
+    rules:
+
+      # ── Tráfego ────────────────────────────────────────────────────────────
+
+      - alert: TrafficDrop
+        expr: |
+          sum(rate(http_requests_total{route!="/health"}[2m])) < 0.1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tráfego zerado ou muito baixo"
+          description: "Menos de 0.1 req/s nos últimos 2 minutos. Possível falha no load-bot ou nos serviços."
+
+      # ── Latência ───────────────────────────────────────────────────────────
+
+      - alert: HighLatencyP99Warning
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, service) (
+              rate(http_request_duration_ms_milliseconds_bucket{route!="/health"}[2m])
+            )
+          ) > 500
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência p99 acima de 500ms — {{ $labels.service }}"
+          description: "p99 = {{ $value | humanizeDuration }} no serviço {{ $labels.service }}."
+
+      - alert: HighLatencyP99Critical
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le, service) (
+              rate(http_request_duration_ms_milliseconds_bucket{route!="/health"}[2m])
+            )
+          ) > 1000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Latência p99 crítica acima de 1s — {{ $labels.service }}"
+          description: "p99 = {{ $value | humanizeDuration }} no serviço {{ $labels.service }}. Degradação severa."
+
+      # ── Erros ──────────────────────────────────────────────────────────────
+
+      - alert: HighErrorRateWarning
+        expr: |
+          sum by (service) (rate(http_errors_total{route!="/health"}[2m]))
+          /
+          sum by (service) (rate(http_requests_total{route!="/health"}[2m]))
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de erro acima de 5% — {{ $labels.service }}"
+          description: "Taxa de erro = {{ $value | humanizePercentage }} no serviço {{ $labels.service }}."
+
+      - alert: HighErrorRateCritical
+        expr: |
+          sum by (service) (rate(http_errors_total{route!="/health"}[2m]))
+          /
+          sum by (service) (rate(http_requests_total{route!="/health"}[2m]))
+          > 0.15
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de erro crítica acima de 15% — {{ $labels.service }}"
+          description: "Taxa de erro = {{ $value | humanizePercentage }} no serviço {{ $labels.service }}."
+
+      # ── Saturação ──────────────────────────────────────────────────────────
+
+      - alert: DBPoolSaturationWarning
+        expr: db_pool_connections_active > 6
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool de conexões DB acima de 6 — {{ $labels.service }}"
+          description: "{{ $value }} conexões ativas. Pool máximo é 10."
+
+      - alert: DBPoolSaturationCritical
+        expr: db_pool_connections_active > 9
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pool de conexões DB quase esgotado — {{ $labels.service }}"
+          description: "{{ $value }} conexões ativas de 10. Novas requisições vão enfileirar."
+
+      - alert: DBPoolQueueBuilding
+        expr: db_pool_connections_waiting > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Requisições aguardando conexão DB — {{ $labels.service }}"
+          description: "{{ $value }} requisições na fila esperando conexão disponível."

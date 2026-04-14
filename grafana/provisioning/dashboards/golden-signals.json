@@ -281,7 +281,7 @@
       "targets": [{ "expr": "sum(http_errors_total{route!=\"/health\"})", "refId": "A" }]
     },
 
-    { "type": "row", "id": 50, "title": "📦 Volume de Logs & Cardinalidade de Métricas", "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 }, "collapsed": false },
+    { "type": "row", "id": 50, "title": "📦 Volume de Logs, Cardinalidade de Métricas & Banco de Dados", "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 }, "collapsed": false },
 
     {
       "id": 51, "type": "timeseries",
@@ -462,6 +462,150 @@
       },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
       "targets": [{ "expr": "sum(count_over_time({job=~\"api-gateway|order-service|inventory-service\", level=\"ERROR\"}[5m])) / sum(count_over_time({job=~\"api-gateway|order-service|inventory-service\"}[5m]))", "refId": "A" }]
+    },
+
+    { "type": "row", "id": 61, "title": "🗄️ Banco de Dados — Operações & Conexões", "gridPos": { "x": 0, "y": 63, "w": 24, "h": 1 }, "collapsed": false },
+
+    {
+      "id": 62, "type": "timeseries",
+      "title": "Operações por segundo — por tipo (SELECT / INSERT / UPDATE)",
+      "description": "Taxa de operações SQL por tipo. Permite ver o impacto de cada fase do load-bot no banco.",
+      "gridPos": { "x": 0, "y": 64, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*SELECT.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue",   "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*INSERT.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*UPDATE.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        {
+          "expr": "sum by (db_operation_name, exported_job) (rate(db_client_operation_duration_seconds_count[1m]))",
+          "legendFormat": "{{exported_job}} {{db_operation_name}}", "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 63, "type": "timeseries",
+      "title": "Latência de DB p50 / p95 / p99 — por operação",
+      "description": "Percentis de latência das queries SQL. Identifica queries lentas por tipo e serviço.",
+      "gridPos": { "x": 12, "y": 64, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max", "mean"] } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, db_operation_name, exported_job) (rate(db_client_operation_duration_seconds_bucket[2m]))) * 1000", "legendFormat": "{{exported_job}} {{db_operation_name}} p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, db_operation_name, exported_job) (rate(db_client_operation_duration_seconds_bucket[2m]))) * 1000", "legendFormat": "{{exported_job}} {{db_operation_name}} p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le, db_operation_name, exported_job) (rate(db_client_operation_duration_seconds_bucket[2m]))) * 1000", "legendFormat": "{{exported_job}} {{db_operation_name}} p99", "refId": "C" }
+      ]
+    },
+
+    {
+      "id": 64, "type": "timeseries",
+      "title": "Conexões do pool — idle vs used por serviço",
+      "description": "Estado das conexões no pool do pg. 'used' alto indica pressão no banco durante picos de carga.",
+      "gridPos": { "x": 0, "y": 72, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "overrides": [
+          { "matcher": { "id": "byRegexp", "options": ".*used.*"  }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*idle.*"  }, "properties": [{ "id": "color", "value": { "fixedColor": "green",  "mode": "fixed" } }] },
+          { "matcher": { "id": "byRegexp", "options": ".*pending.*" }, "properties": [{ "id": "color", "value": { "fixedColor": "red",    "mode": "fixed" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+      "targets": [
+        { "expr": "db_client_connection_count{db_client_connection_state=\"used\"}",    "legendFormat": "{{exported_job}} used",    "refId": "A" },
+        { "expr": "db_client_connection_count{db_client_connection_state=\"idle\"}",    "legendFormat": "{{exported_job}} idle",    "refId": "B" },
+        { "expr": "db_client_connection_pending_requests",                              "legendFormat": "{{exported_job}} pending", "refId": "C" }
+      ]
+    },
+
+    {
+      "id": 65, "type": "timeseries",
+      "title": "Throughput de DB — operações acumuladas",
+      "description": "Total acumulado de operações SQL. Mostra o volume real de escrita e leitura gerado pelo load-bot.",
+      "gridPos": { "x": 12, "y": 72, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 5 } }
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "expr": "sum by (db_operation_name) (db_client_operation_duration_seconds_count)",
+          "legendFormat": "{{db_operation_name}} total", "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 66, "type": "stat",
+      "title": "Operações DB/s atual",
+      "description": "Taxa atual de operações SQL. Sobe junto com o RPS durante picos do load-bot.",
+      "gridPos": { "x": 0, "y": 80, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ops",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 30 }, { "color": "red", "value": 60 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(rate(db_client_operation_duration_seconds_count[1m]))", "refId": "A" }]
+    },
+
+    {
+      "id": 67, "type": "stat",
+      "title": "Latência média DB",
+      "description": "Latência média de todas as operações SQL. Deve permanecer abaixo de 50ms em condições normais.",
+      "gridPos": { "x": 4, "y": 80, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 200 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(rate(db_client_operation_duration_seconds_sum[2m])) / sum(rate(db_client_operation_duration_seconds_count[2m])) * 1000", "refId": "A" }]
+    },
+
+    {
+      "id": 68, "type": "stat",
+      "title": "Total operações DB",
+      "description": "Total acumulado de queries executadas desde o início do lab.",
+      "gridPos": { "x": 8, "y": 80, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "sum(db_client_operation_duration_seconds_count)", "refId": "A" }]
+    },
+
+    {
+      "id": 69, "type": "stat",
+      "title": "Séries DB no Prometheus",
+      "description": "Número de séries de métricas de banco. Baixo = sem alta cardinalidade (não usamos queryText como label).",
+      "gridPos": { "x": 12, "y": 80, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "otellab_prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "orange", "value": 50 }, { "color": "red", "value": 200 }
+          ]}
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "targets": [{ "expr": "count({__name__=~\"db_client.*\"})", "refId": "A", "instant": true }]
     }
 
   ]

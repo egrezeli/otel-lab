@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+
+  <!-- Console com JSON estruturado -->
   <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
     <encoder class="net.logstash.logback.encoder.LogstashEncoder">
       <includeMdcKeyName>traceId</includeMdcKeyName>
       <includeMdcKeyName>spanId</includeMdcKeyName>
-      <customFields>{"service":"service-b"}</customFields>
+      <customFields>{"service":"payment-service"}</customFields>
     </encoder>
+  </appender>
+
+  <!-- OTel appender — envia logs via OTLP para o collector → Loki -->
+  <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+    <captureExperimentalAttributes>true</captureExperimentalAttributes>
+    <captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
   </appender>
 
   <root level="INFO">
     <appender-ref ref="JSON_CONSOLE"/>
+    <appender-ref ref="OTEL"/>
   </root>
+
 </configuration>

@@ -7,7 +7,12 @@ const logger   = require('./logger');
 const { createGoldenSignals } = require('./golden-signals');
 
 const app  = express();
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const dbUrl  = new URL(process.env.DATABASE_URL.replace('postgresql://', 'http://'));
+const pool   = new Pool({
+  host: dbUrl.hostname, port: Number(dbUrl.port) || 5432,
+  database: dbUrl.pathname.slice(1),
+  user: dbUrl.username, password: dbUrl.password,
+});
 app.use(express.json());
 
 const { goldenSignalsMiddleware } = createGoldenSignals('order-service', pool);
@@ -41,16 +46,25 @@ app.post('/orders', async (req, res) => {
     logger.info('Reservando estoque', { orderId, productId, quantity, step: 'inventory-reserve' });
     const inventory = (await axios.post(`${INVENTORY_URL}/reserve`, { productId, quantity, orderId })).data;
 
-    logger.info('Processando pagamento', { orderId, amount: inventory.totalPrice, step: 'payment-charge' });
-    const payment = (await axios.post(`${PAYMENT_URL}/payments/charge`, {
-      orderId, userId, amount: inventory.totalPrice,
-    })).data;
+    try {
+      logger.info('Processando pagamento', { orderId, amount: inventory.totalPrice, step: 'payment-charge' });
+      const payment = (await axios.post(`${PAYMENT_URL}/payments/charge`, {
+        orderId, userId, amount: inventory.totalPrice,
+      })).data;
 
-    logger.info('Atualizando status do pedido', { orderId, step: 'db-order-update' });
-    await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['completed', orderId]);
+      logger.info('Atualizando status do pedido', { orderId, step: 'db-order-update' });
+      await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['completed', orderId]);
 
-    logger.info('Pedido concluído', { orderId, transactionId: payment.transactionId, step: 'order-complete' });
-    res.status(201).json({ orderId, inventory, payment, traceId });
+      logger.info('Pedido concluído', { orderId, transactionId: payment.transactionId, step: 'order-complete' });
+      res.status(201).json({ orderId, inventory, payment, traceId });
+    } catch (paymentErr) {
+      // Pagamento falhou — reverte a reserva de estoque para manter consistência
+      logger.warn('Pagamento falhou, revertendo reserva de estoque', { orderId, error: paymentErr.message, step: 'inventory-rollback' });
+      await axios.post(`${INVENTORY_URL}/release`, { productId, quantity, orderId }).catch((releaseErr) => {
+        logger.error('Falha ao reverter estoque — inconsistência detectada', { orderId, error: releaseErr.message, step: 'inventory-rollback-failed' });
+      });
+      throw paymentErr;
+    }
   } catch (err) {
     await pool.query('UPDATE orders SET status = $1 WHERE id = $2', ['failed', orderId]).catch(() => {});
     span?.setStatus({ code: SpanStatusCode.ERROR, message: err.message });

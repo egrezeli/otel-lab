@@ -5,9 +5,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB:       ordersdb
-      POSTGRES_USER:     otellab
-      POSTGRES_PASSWORD: otellab
+      POSTGRES_DB:       ${POSTGRES_DB:-ordersdb}
+      POSTGRES_USER:     ${POSTGRES_USER:-otellab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otellab}
     volumes:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
@@ -32,6 +32,11 @@ services:
     depends_on:
       - otel-collector
       - order-service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   order-service:
     build: ./order-service
@@ -43,7 +48,7 @@ services:
       INVENTORY_SERVICE_URL: http://inventory-service:3002
       PAYMENT_SERVICE_URL:   http://payment-service:8080
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      DATABASE_URL: postgresql://otellab:otellab@postgres:5432/ordersdb
+      DATABASE_URL: postgresql://${POSTGRES_USER:-otellab}:${POSTGRES_PASSWORD:-otellab}@postgres:5432/${POSTGRES_DB:-ordersdb}
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,6 +58,11 @@ services:
         condition: service_started
       payment-service:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   inventory-service:
     build: ./inventory-service
@@ -62,12 +72,17 @@ services:
       SERVICE_NAME:      inventory-service
       OTEL_SERVICE_NAME: inventory-service
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      DATABASE_URL: postgresql://otellab:otellab@postgres:5432/ordersdb
+      DATABASE_URL: postgresql://${POSTGRES_USER:-otellab}:${POSTGRES_PASSWORD:-otellab}@postgres:5432/${POSTGRES_DB:-ordersdb}
     depends_on:
       postgres:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   payment-service:
     build: ./service-b
@@ -75,14 +90,32 @@ services:
       - "8080:8080"
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      DATABASE_URL: jdbc:postgresql://postgres:5432/ordersdb
-      DB_USER: otellab
-      DB_PASS: otellab
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-ordersdb}
+      DB_USER: ${DB_USER:-otellab}
+      DB_PASS: ${DB_PASS:-otellab}
     depends_on:
       postgres:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/payments/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  service-a:
+    build: ./service-a
+    ports:
+      - "3010:3000"
+    environment:
+      SERVICE_NAME:      service-a
+      OTEL_SERVICE_NAME: service-a
+      SERVICE_B_URL:     http://payment-service:8080
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    depends_on:
+      - otel-collector
+      - payment-service
 
   # ── Load Bot ────────────────────────────────────────────────────────────────
 
@@ -130,6 +163,7 @@ services:
     image: prom/prometheus:v2.53.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus-rules.yml:/etc/prometheus/rules.yml
     ports:
       - "9090:9090"
 
